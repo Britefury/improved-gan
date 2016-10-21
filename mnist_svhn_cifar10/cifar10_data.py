@@ -20,7 +20,7 @@ def maybe_download_and_extract(data_dir, url='http://www.cs.toronto.edu/~kriz/ci
             print()
             statinfo = os.stat(filepath)
             print('Successfully downloaded', filename, statinfo.st_size, 'bytes.')
-            tarfile.open(filepath, 'r:gz').extractall(data_dir)
+        tarfile.open(filepath, 'r:gz').extractall(data_dir)
 
 def unpickle(file):
     fo = open(file, 'rb')
