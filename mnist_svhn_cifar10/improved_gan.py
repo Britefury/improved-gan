@@ -1,4 +1,4 @@
-from collections import namedtuple
+from collections import namedtuple, OrderedDict
 import time
 import numpy as np
 import theano as th
@@ -9,6 +9,7 @@ from lasagne.init import Normal
 from lasagne.layers import dnn
 import nn
 import sys
+import lasagne
 from britefury_lasagne import data_source
 
 
@@ -37,7 +38,7 @@ class FeatureMatchingStabilizer (AbstractStabilizer):
         m2 = T.mean(output_gen,axis=0)
         loss_gen = T.mean(abs(m1-m2)) # feature matching loss
         gen_params = ll.get_all_params(gen_model.layers, trainable=True)
-        gen_param_updates = nn.adam_updates(gen_params, loss_gen, lr=lr, mom1=0.5)
+        gen_param_updates = lasagne.updates.adam(loss_gen, gen_params, learning_rate=lr, beta1=0.5)
         return th.function(inputs=[batch_size_var, x_unlabeled, lr], outputs=None, updates=gen_param_updates)
 
 
@@ -54,7 +55,7 @@ class MinibatchDiscriminationStabilizer (AbstractStabilizer):
     def generator_update_function(self, disc_model, gen_model, batch_size_var, x_unlabeled, gen_output_train, loss_fake, lr):
         loss_gen = -T.mean(T.nnet.softplus(loss_fake))
         gen_params = ll.get_all_params(gen_model.final_layer, trainable=True)
-        gen_param_updates = nn.adam_updates(gen_params, loss_gen, lr=lr, mom1=0.5)
+        gen_param_updates = lasagne.updates.adam(loss_gen, gen_params, learning_rate=lr, beta1=0.5)
         return th.function(inputs=[batch_size_var, lr], outputs=None, updates=gen_param_updates)
 
 
@@ -138,12 +139,17 @@ class ImprovedGANSemiSupervisedClassifier (object):
 
         # Theano functions for training the disc net
         disc_params = ll.get_all_params(disc_model.layers, trainable=True)
-        disc_param_updates = nn.adam_updates(disc_params, disc_loss_lab + self.unlabeled_weight*disc_loss_unlab, lr=lr, mom1=0.5)
+        disc_param_updates = lasagne.updates.adam(disc_loss_lab + self.unlabeled_weight*disc_loss_unlab, disc_params, learning_rate=lr, beta1=0.5)
         disc_param_avg = [th.shared(np.cast[th.config.floatX](0.*p.get_value())) for p in disc_params]
-        disc_avg_updates = [(a,a+0.0001*(p-a)) for p,a in zip(disc_params,disc_param_avg)]
+        disc_avg_updates = OrderedDict()
+        for p, a in zip(disc_params, disc_param_avg):
+            disc_avg_updates[a] = a+0.0001*(p-a)
         disc_avg_givens = [(p,a) for p,a in zip(disc_params,disc_param_avg)]
         self.init_param = th.function(inputs=[self.batch_size_var, x_lab], outputs=None, updates=init_updates) # data based initialization
-        self.train_batch_disc = th.function(inputs=[self.batch_size_var,x_lab,labels,x_unl,lr], outputs=[disc_loss_lab, disc_loss_unlab, train_err], updates=disc_param_updates+disc_avg_updates)
+        disc_updates = disc_param_updates.copy()
+        disc_updates.update(disc_avg_updates)
+        self.train_batch_disc = th.function(inputs=[self.batch_size_var,x_lab,labels,x_unl,lr],
+                                            outputs=[disc_loss_lab, disc_loss_unlab, train_err], updates=disc_updates)
         self.test_batch = th.function(inputs=[x_lab,labels], outputs=test_err, givens=disc_avg_givens)
         self.samplefun = th.function(inputs=[z_noise],outputs=gen_output_generate)
 
